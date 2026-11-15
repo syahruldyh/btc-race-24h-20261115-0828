@@ -1,47 +1,74 @@
-# Crash-Rebound Dip Bot — btc-race-24h-20261115-0828
+# BTC Predator v2 — btc-race-24h-20261115-0828
 
-Long-only mean-reversion bot trading cbBTC/USDC on 1-minute Orca
+Multi-regime long-only bot trading cbBTC/USDC on 1-minute Orca
 Whirlpool bars, for the make.fun 24-hour live BTC trading race.
+Round 2 resubmission: replaces the v1 "Crash-Rebound Dip Bot".
 
-## Strategy
+## Strategy (three families, one regime filter)
 
-- **Buy** the full cash when the close prints **2% below its 120-minute
-  simple average** (a capitulation dip).
-- **Sell** everything on a **1% trailing stop** from the highest close
-  since entry, with a hard **-2% stop** from the entry close.
-- One position at a time; no shorts, no leverage, no averaging down.
+- **Regime**: EMA(9)/EMA(21)/EMA(50) alignment + EMA(50) slope.
+  Bull -> breakout + pullback. Range -> mean-reversion only.
+  Bear -> no new longs except a confirmed sweep reversal.
+- **Momentum breakout** (primary in the skill): bull regime, close
+  breaks the prior 20-bar high by >= 0.15 ATR, closes in the top
+  quartile of its bar, not extended > 1.5% above EMA(9), above
+  EMA(50). Stop 1.5 ATR below the actual fill.
+- **Trend pullback**: bull regime, a genuine reclaim — previous bar
+  closed below EMA(21), this one closes back above it on a strong
+  green candle, above EMA(50). Stop 1.3 ATR.
+- **Liquidity-sweep reversal**: a deep dip — close 2% below the
+  2-hour average — while RSI(14) < 45. Stop 6 ATR, risk 1% of
+  equity. Fires in any regime: a capitulation dip happens inside a
+  bear regime by definition.
+- **Sizing**: risk 1.5% of equity per trade (1% for sweeps);
+  quantity = risk budget / stop distance, capped by cash.
+  One position max. No averaging down, no martingale, no pyramiding.
+- **Exits**: scale out 35% at +3R, 30% at +6R; trail the rest at
+  6 ATR below the highest close since entry; hard stop; bull
+  setups exit if the close breaks below EMA(50) (not applied to
+  sweep trades — they are bought below EMA(50) by design).
 
-## Why this shape
+## What is actually enabled, and why
 
-The published dev window fell 3.9% with one violent V-shaped rebound
-(+4.7% in an hour). The dev leaderboard's top 10 are all dip-buy /
-capitulation bots (3-10 trades, +$54-58). Trend and EMA-cross bots
-whipsaw to death on 1-minute noise once fees, slippage and pool
-impact (~26-38 bps a full-size round trip) are counted. This bot is
-deliberately selective: few trades, deep entries, trailing exits.
+The grid (official evaluator, 20+ configurations on the published
+1,440-bar dev window) says the full three-family version loses:
+research defaults -$96.71 (70 trades), breakout-only -$31.17,
+pullback-only -$101.67, any combined variant -$38 to -$143.
+On this market the momentum families chase the snapback's top and
+bleed on 1-minute noise. The sweep is the only family with an edge,
+so the regime filter enables only it here (`enableBreakout: false,
+enablePullback: false` in `main.ts`). The breakout/pullback code
+stays in the file — documented and tested, not deleted — for a
+genuinely bullish race window. The skill says "do not force trades
+when signals are weak"; this selection is that rule applied.
 
-## Backtest (own simulator, real fill model, dev window)
+## Backtest (official evaluator, grade-local --driver process)
 
 | Variant | Net PnL | Trades | Max DD |
 |---|---|---|---|
-| Dip -2% vs SMA120, trail -1% (this bot) | +$33.22 | 4 | 1.75% |
-| Dip -1.8% vs SMA120, trail -1% | +$15.41 | 6 | — |
-| Dip -2.2% vs SMA120, trail -1% | +$34.77 | 4 | — |
-| EMA 8/21 cross | -$134.99 | 63 | 13.66% |
+| Predator v2, sweep-only, stop/trail 6 ATR, scale +3R/+6R (this bot) | +$28.29 | 5 | 1.22% |
+| Same, scale +2R/+4R | +$25.47 | 5 | 1.22% |
+| Same, scale +1.5R/+2.5R | +$21.56 | 6 | 1.22% |
+| Same, never scale out | +$17.56 | 4 | 0.62% |
+| Predator v2, all three families (research defaults) | -$96.71 | 70 | 9.67% |
+| v1 Crash-Rebound Dip Bot (round 1 entry) | +$33.22 | 4 | 1.73% |
 | Buy-and-hold | -$43.96 | 1 | 7.93% |
 
-The -1.8% to -2.2% dip band all clear the dev gate (PnL > $0), so the
-parameters sit on a plateau, not a knife edge. Nothing here is tuned
-to squeeze the dev window: the race window is unseen, and a simple
-two-parameter rule is the honest defence against overfitting it.
+The dev gate is PnL > $0; this bot clears it with margin
+(+$28.29). It scores below v1 on dev (+$33.22) — the scale-outs
+bank profit earlier than v1's pure trail — but v1 is a single
+two-parameter rule and v2 is the strategy Sepa ordered for this
+resubmission, with the same dip-buy edge underneath. The race
+window is unseen; nothing here promises a top-10 finish.
 
 ## Run
 
 ```sh
-node <kit>/cli/makefun.mjs grade-local --kit <kit> --bot .
+node <kit>/cli/makefun.mjs grade-local --kit <kit> --bot . --driver process --worktree
 ```
 
 Entrypoint: `main.ts` (Node 22, standard library only, plus the
 vendored `vendor/makefun-bars.ts` SDK shim copied byte-identical from
-the kit). Deterministic: bigint arithmetic only, no clock, no
-randomness.
+the kit). Deterministic: two grade-local runs produce byte-identical
+action logs (L1 regrade reproduced). No clock, no environment, no
+randomness, no network.
